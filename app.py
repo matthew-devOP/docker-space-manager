@@ -6,11 +6,22 @@ Safely cleans up unused Docker resources without affecting existing containers.
 
 import json
 import os
+import platform
 import subprocess
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
+
+# macOS tk.Button ignores bg/fg — use tkmacosx.Button if available
+if platform.system() == "Darwin":
+    try:
+        from tkmacosx import Button as MacButton
+        _Button = MacButton
+    except ImportError:
+        _Button = tk.Button
+else:
+    _Button = tk.Button
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -321,7 +332,7 @@ class DockerSpaceManager(tk.Tk):
         btn_frame = tk.Frame(header, bg=c["bg"])
         btn_frame.pack(side="right")
 
-        self.refresh_btn = tk.Button(
+        self.refresh_btn = _Button(
             btn_frame, text="⟳  Refresh", font=("SF Pro Display", 12),
             bg=c["accent"], fg="#ffffff", relief="flat", padx=14, pady=6,
             activebackground=c["accent_hover"], activeforeground="#ffffff",
@@ -463,25 +474,25 @@ class DockerSpaceManager(tk.Tk):
         btns = tk.Frame(actions_frame, bg=c["bg"])
         btns.pack(fill="x")
 
-        tk.Button(btns, text=f"Clean Build Cache ({self.build_cache.get('reclaimable', '0B')})",
+        _Button(btns, text=f"Clean Build Cache ({self.build_cache.get('reclaimable', '0B')})",
                   font=("SF Pro Display", 11), bg=c["danger"], fg="#ffffff",
                   relief="flat", padx=14, pady=8,
                   command=self.clean_build_cache, cursor="pointinghand"
                   ).pack(side="left", padx=5)
 
-        tk.Button(btns, text=f"Remove Unused Images ({human_size(unused_bytes)})",
+        _Button(btns, text=f"Remove Unused Images ({human_size(unused_bytes)})",
                   font=("SF Pro Display", 11), bg=c["danger"], fg="#ffffff",
                   relief="flat", padx=14, pady=8,
                   command=self.clean_unused_images, cursor="pointinghand"
                   ).pack(side="left", padx=5)
 
-        tk.Button(btns, text=f"Remove Orphan Volumes ({human_size(orphan_vol_bytes)})",
+        _Button(btns, text=f"Remove Orphan Volumes ({human_size(orphan_vol_bytes)})",
                   font=("SF Pro Display", 11), bg=c["warning"], fg="#000000",
                   relief="flat", padx=14, pady=8,
                   command=self.clean_orphan_volumes, cursor="pointinghand"
                   ).pack(side="left", padx=5)
 
-        tk.Button(btns, text=f"Safe Clean All ({human_size(total_reclaimable)})",
+        _Button(btns, text=f"Safe Clean All ({human_size(total_reclaimable)})",
                   font=("SF Pro Display", 11), bg="#dc2626", fg="#ffffff",
                   relief="flat", padx=14, pady=8,
                   command=self.safe_clean_all, cursor="pointinghand"
@@ -700,13 +711,13 @@ class DockerSpaceManager(tk.Tk):
         btn_frame = tk.Frame(self.images_frame, bg=c["bg"], pady=10)
         btn_frame.pack(fill="x")
 
-        tk.Button(btn_frame, text="Remove Selected (Safe Only)",
+        _Button(btn_frame, text="Remove Selected (Safe Only)",
                   font=("SF Pro Display", 11), bg=c["danger"], fg="#ffffff",
                   relief="flat", padx=14, pady=8,
                   command=self.remove_selected_images, cursor="pointinghand"
                   ).pack(side="left", padx=5)
 
-        tk.Button(btn_frame, text="Remove All Unused Images",
+        _Button(btn_frame, text="Remove All Unused Images",
                   font=("SF Pro Display", 11), bg=c["danger"], fg="#ffffff",
                   relief="flat", padx=14, pady=8,
                   command=self.clean_unused_images, cursor="pointinghand"
@@ -803,13 +814,13 @@ class DockerSpaceManager(tk.Tk):
         btn_frame = tk.Frame(self.volumes_frame, bg=c["bg"], pady=10)
         btn_frame.pack(fill="x")
 
-        tk.Button(btn_frame, text="Remove Selected Orphan Volumes",
+        _Button(btn_frame, text="Remove Selected Orphan Volumes",
                   font=("SF Pro Display", 11), bg=c["danger"], fg="#ffffff",
                   relief="flat", padx=14, pady=8,
                   command=self.remove_selected_volumes, cursor="pointinghand"
                   ).pack(side="left", padx=5)
 
-        tk.Button(btn_frame, text="Remove All Orphan Volumes",
+        _Button(btn_frame, text="Remove All Orphan Volumes",
                   font=("SF Pro Display", 11), bg=c["warning"], fg="#000000",
                   relief="flat", padx=14, pady=8,
                   command=self.clean_orphan_volumes, cursor="pointinghand"
@@ -868,7 +879,7 @@ class DockerSpaceManager(tk.Tk):
                  justify="left").pack(anchor="w", pady=(10, 0))
 
         # Button
-        tk.Button(self.cache_frame, text="Clear Build Cache",
+        _Button(self.cache_frame, text="Clear Build Cache",
                   font=("SF Pro Display", 13, "bold"), bg=c["danger"], fg="#ffffff",
                   relief="flat", padx=20, pady=10,
                   command=self.clean_build_cache, cursor="pointinghand"
