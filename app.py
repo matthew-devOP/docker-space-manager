@@ -8,33 +8,92 @@ import json
 import os
 import platform
 import subprocess
+import sys
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
 
-# macOS tk.Button ignores bg/fg — use tkmacosx.Button if available
+# macOS tk.Button ignores bg/activebackground — use tkmacosx.Button if
+# available; otherwise fall back gracefully so buttons stay readable.
+_HAS_TKMACOSX = False
+MacButton = None
 if platform.system() == "Darwin":
     try:
-        from tkmacosx import Button as MacButton
-        _Button = MacButton
+        from tkmacosx import Button as MacButton  # noqa: F401
+        _HAS_TKMACOSX = True
     except ImportError:
-        _Button = tk.Button
-else:
-    _Button = tk.Button
+        print(
+            "⚠  tkmacosx not installed — buttons will use native macOS chrome.\n"
+            "   For colored buttons, run: pip install tkmacosx",
+            file=sys.stderr,
+        )
+
+
+def _Button(parent, **kwargs):
+    """Button factory. Uses tkmacosx.Button when available; otherwise falls
+    back to tk.Button and strips color kwargs that macOS would ignore
+    (which would otherwise leave white-on-white text)."""
+    if _HAS_TKMACOSX:
+        return MacButton(parent, **kwargs)
+    if platform.system() == "Darwin":
+        for k in ("bg", "activebackground", "activeforeground"):
+            kwargs.pop(k, None)
+        kwargs["fg"] = "#000000"
+    return tk.Button(parent, **kwargs)
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
 
-def run_docker(*args):
+def run_docker(*args, timeout=60):
     """Run a docker command and return stdout, or raise on error."""
     result = subprocess.run(
         ["docker", *args],
-        capture_output=True, text=True, timeout=60
+        capture_output=True, text=True, timeout=timeout
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip())
     return result.stdout.strip()
+
+
+def run_docker_stream(on_line, *args, timeout=3600):
+    """Run a docker command and stream stdout/stderr line-by-line to on_line().
+
+    Used for long-running operations like `builder prune -af` that can take
+    many minutes on large caches; the synchronous run_docker would hit its
+    60-second timeout. Returns the full combined output on success.
+    """
+    proc = subprocess.Popen(
+        ["docker", *args],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    lines = []
+    try:
+        for line in iter(proc.stdout.readline, ""):
+            line = line.rstrip()
+            if not line:
+                continue
+            lines.append(line)
+            try:
+                on_line(line)
+            except Exception:
+                pass
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        raise
+    finally:
+        try:
+            proc.stdout.close()
+        except Exception:
+            pass
+    if proc.returncode != 0:
+        tail = "\n".join(lines[-8:]) or "(no output)"
+        raise RuntimeError(f"docker {' '.join(args)} exited {proc.returncode}\n{tail}")
+    return "\n".join(lines)
 
 
 def human_size(nbytes):
@@ -890,13 +949,26 @@ class DockerSpaceManager(tk.Tk):
     def clean_build_cache(self):
         if not messagebox.askyesno("Confirm", "Clear all Docker build cache?"):
             return
-        self.set_status("Clearing build cache...")
-        try:
-            result = run_docker("builder", "prune", "-af")
-            messagebox.showinfo("Done", f"Build cache cleared.\n\n{result}")
-            self.refresh_all()
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
+        self.set_status("Clearing build cache…")
+
+        def worker():
+            try:
+                def on_line(line):
+                    self.after(0, self.set_status, f"build cache › {line[:140]}")
+                result = run_docker_stream(
+                    on_line, "builder", "prune", "-af", timeout=3600
+                )
+                tail = "\n".join(result.splitlines()[-12:])
+                self.after(0, lambda: messagebox.showinfo(
+                    "Done", f"Build cache cleared.\n\n{tail}"))
+                self.after(0, self.set_status, "Ready")
+                self.after(0, self.refresh_all)
+            except Exception as e:
+                err = str(e)
+                self.after(0, lambda: messagebox.showerror("Error", err))
+                self.after(0, self.set_status, "Ready")
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def clean_unused_images(self):
         container_images = set()
@@ -1116,9 +1188,9 @@ class DockerSpaceManager(tk.Tk):
         self.set_status("Running safe cleanup...")
         results = []
 
-        # Build cache
+        # Build cache — use higher timeout; large caches can take minutes
         try:
-            run_docker("builder", "prune", "-af")
+            run_docker("builder", "prune", "-af", timeout=3600)
             results.append("✓ Build cache cleared")
         except Exception as e:
             results.append(f"✕ Build cache: {e}")
